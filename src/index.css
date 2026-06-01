@@ -1,0 +1,208 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Typefaces ── */
+  --font-serif: 'Cormorant Garamond', 'Georgia', 'Times New Roman', serif;
+  --font-sans:  'Inter', system-ui, sans-serif;
+
+  /* Canvas & Surfaces */
+  --color-canvas:     var(--canvas);
+  --color-surface:    var(--surface);
+  --color-panel:      var(--panel);
+  --color-raised:     var(--raised);
+  --color-hover:      var(--hover);
+
+  /* Rules / Borders */
+  --color-rule:       var(--rule);
+  --color-rule-dim:   var(--rule-dim);
+
+  /* Text */
+  --color-ink:        var(--ink);
+  --color-ink-2:      var(--ink-2);
+  --color-ink-3:      var(--ink-3);
+  --color-ink-4:      var(--ink-4);
+
+  /* Gold — primary accent */
+  --color-gold:       var(--gold);
+  --color-gold-dim:   var(--gold-dim);
+  --color-gold-wash:  var(--gold-wash);
+  --color-gold-rule:  var(--gold-rule);
+
+  /* Verdigris — synthesis/themes accent */
+  --color-verd:       var(--verd);
+  --color-verd-dim:   var(--verd-dim);
+  --color-verd-wash:  var(--verd-wash);
+  --color-verd-rule:  var(--verd-rule);
+
+  /* Rouge — danger */
+  --color-rouge:      var(--rouge);
+  --color-rouge-wash: var(--rouge-wash);
+  --color-rouge-rule: var(--rouge-rule);
+}
+
+:root {
+  /* ── Dark Theme Defaults (Warm Academic Dark) ── */
+  --canvas:     oklch(10.5% 0.013 55);
+  --surface:    oklch(14%   0.014 52);
+  --panel:      oklch(17.5% 0.015 50);
+  --raised:     oklch(21%   0.017 50);
+  --hover:      oklch(24%   0.018 50);
+
+  --rule:       oklch(29%   0.02  52);
+  --rule-dim:   oklch(23%   0.016 52);
+
+  --ink:        oklch(91%   0.018 82);
+  --ink-2:      oklch(74%   0.015 78);
+  --ink-3:      oklch(52%   0.013 70);
+  --ink-4:      oklch(34%   0.010 65);
+
+  --gold:       oklch(73%   0.130 76);
+  --gold-dim:   oklch(59%   0.110 72);
+  --gold-wash:  oklch(19%   0.040 68);
+  --gold-rule:  oklch(34%   0.070 70);
+
+  --verd:       oklch(56%   0.070 155);
+  --verd-dim:   oklch(43%   0.060 152);
+  --verd-wash:  oklch(16.5% 0.026 152);
+  --verd-rule:  oklch(28%   0.050 152);
+
+  --rouge:      oklch(52%   0.100 27);
+  --rouge-wash: oklch(15.5% 0.030 23);
+  --rouge-rule: oklch(30%   0.060 25);
+}
+
+[data-theme="light"] {
+  /* ── Muted Light Academic Theme (Ivory & Burnished Gold) ── */
+  --canvas:     oklch(95%   0.010 75);
+  --surface:    oklch(97.5% 0.008 75);
+  --panel:      oklch(93.5% 0.012 75);
+  --raised:     oklch(91.5% 0.015 75);
+  --hover:      oklch(89.5% 0.018 75);
+
+  --rule:       oklch(80%   0.015 75);
+  --rule-dim:   oklch(87%   0.012 75);
+
+  --ink:        oklch(18%   0.015 70);
+  --ink-2:      oklch(32%   0.015 70);
+  --ink-3:      oklch(50%   0.012 70);
+  --ink-4:      oklch(64%   0.010 70);
+
+  --gold:       oklch(55%   0.110 76);
+  --gold-dim:   oklch(44%   0.090 72);
+  --gold-wash:  oklch(94%   0.030 76);
+  --gold-rule:  oklch(80%   0.070 76);
+
+  --verd:       oklch(42%   0.060 155);
+  --verd-dim:   oklch(34%   0.050 152);
+  --verd-wash:  oklch(93.5% 0.025 152);
+  --verd-rule:  oklch(76%   0.040 152);
+
+  --rouge:      oklch(45%   0.090 27);
+  --rouge-wash: oklch(94%   0.020 23);
+  --rouge-rule: oklch(78%   0.050 25);
+}
+
+/* ── Base Reset ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  font-family: var(--font-sans);
+  font-feature-settings: 'kern', 'liga', 'calt';
+  background-color: var(--canvas);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+body { margin: 0; }
+
+/* ── Refined Scrollbars ─────────────────────────────────────── */
+::-webkit-scrollbar            { width: 4px; height: 4px; }
+::-webkit-scrollbar-track      { background: transparent; }
+::-webkit-scrollbar-thumb      { background: var(--rule); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover{ background: var(--hover); }
+
+/* ── Native Dialog ──────────────────────────────────────────── */
+dialog {
+  background:  var(--surface);
+  border:      1px solid var(--rule);
+  border-top:  2px solid var(--gold);
+  border-radius: 6px;
+  color:       var(--ink);
+  padding:     0;
+  max-width:   680px;
+  width:       calc(100vw - 2rem);
+  box-shadow:  0 32px 80px oklch(0% 0 0 / 45%),
+               0 4px 16px oklch(0% 0 0 / 25%);
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+dialog::backdrop {
+  background: color-mix(in oklch, var(--canvas) 82%, transparent);
+  backdrop-filter: blur(8px) saturate(0.6);
+  transition: background-color 0.3s ease;
+}
+dialog[open] {
+  animation: dialog-appear 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes dialog-appear {
+  from { opacity: 0; transform: translateY(-12px) scale(0.975); }
+  to   { opacity: 1; transform: translateY(0)     scale(1);     }
+}
+
+/* ── select element dark styling ─────────────────────────────── */
+select option {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+/* ── Multi-line Clamp ────────────────────────────────────────── */
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  line-clamp: 3;
+  overflow: clip;
+}
+
+/* ── Skeleton Shimmer ────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -700px 0; }
+  100% { background-position:  700px 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    105deg,
+    var(--panel) 30%,
+    var(--raised) 50%,
+    var(--panel) 70%
+  );
+  background-size: 700px 100%;
+  animation: shimmer 1.7s ease-in-out infinite;
+  border-radius: 3px;
+  color: transparent !important;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── Gold page-top accent stripe ─────────────────────────────── */
+.page-crown {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--gold-dim) 0%,
+    var(--gold) 38%,
+    var(--gold) 62%,
+    var(--gold-dim) 100%
+  );
+  z-index: 60;
+  pointer-events: none;
+}
+
+/* ── Serif display utility ───────────────────────────────────── */
+.font-display {
+  font-family: var(--font-serif);
+}
