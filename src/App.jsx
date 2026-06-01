@@ -219,6 +219,7 @@ const emptyPaper = () => ({
   key_quotes: [],
   methodology: '', key_findings: '', limitations: '',
   citation_key: '', relevance_to_my_essay: '',
+  abstract: '',
 });
 
 const emptyTheme = () => ({
@@ -582,6 +583,7 @@ function PaperFormModal({ dialogRef, initial, onSave, onAddTokenLog }) {
         ...initial,
         category: initial.category || '',
         suggested_themes: initial.suggested_themes || [],
+        abstract: String(initial.abstract || '').replace(/\\n/g, '\n'),
         methodology: String(initial.methodology || '').replace(/\\n/g, '\n'),
         key_findings: String(initial.key_findings || '').replace(/\\n/g, '\n'),
         limitations: String(initial.limitations || '').replace(/\\n/g, '\n'),
@@ -643,7 +645,7 @@ function PaperFormModal({ dialogRef, initial, onSave, onAddTokenLog }) {
     setAiLoading(true);
     setAiError('');
 
-    const systemPrompt = `You are an expert academic reviewer. Analyze the provided text and return ONLY a valid JSON object with exactly these ten keys:
+    const systemPrompt = `You are an expert academic reviewer. Analyze the provided text and return ONLY a valid JSON object with exactly these eleven keys:
 {
   "title": "<full paper title as written, or null if not found>",
   "authors": "<authors formatted as 'Last, F., Last, F., et al.' — use et al. for more than 3 authors, or null if not found>",
@@ -657,6 +659,7 @@ function PaperFormModal({ dialogRef, initial, onSave, onAddTokenLog }) {
       "theme": "<the exact name of the suggested theme this quote belongs to — MUST match one of the items in suggested_themes array>"
     }
   ],
+  "abstract": "<a concise 1-paragraph summary of the paper's original abstract as written or inferred from the text, or null if not found>",
   "methodology": "<concise description of the study's research design, methods, and analytical approach>",
   "key_findings": "<3-5 bullet-point summary of the main results and contributions>",
   "limitations": "<2-4 key limitations, constraints, or caveats acknowledged or apparent from the work>"
@@ -723,6 +726,7 @@ No markdown, no code fences, no extra keys, no explanation — only the raw JSON
         suggested_themes: parsed.suggested_themes || [],
         key_quotes:       parsed.key_quotes || [],
         // ── Analytical fields: always overwrite with AI output
+        abstract:     parsed.abstract ? String(parsed.abstract).replace(/\\n/g, '\n') : p.abstract,
         methodology:  parsed.methodology ? String(parsed.methodology).replace(/\\n/g, '\n') : p.methodology,
         key_findings: parsed.key_findings ? String(parsed.key_findings).replace(/\\n/g, '\n') : p.key_findings,
         limitations:  parsed.limitations ? String(parsed.limitations).replace(/\\n/g, '\n') : p.limitations,
@@ -954,6 +958,9 @@ No markdown, no code fences, no extra keys, no explanation — only the raw JSON
           <div className="h-px bg-rule-dim" />
 
           {/* AI-populated analytical fields */}
+          <FormField label="Abstract">
+            <textarea className={`${inputCls} min-h-[68px] ${aiLoading ? 'skeleton' : ''}`} placeholder="Concise summary of the paper's original abstract…" value={form.abstract || ''} onChange={e => set('abstract', e.target.value)} disabled={aiLoading} />
+          </FormField>
           <FormField label="Methodology">
             <textarea className={`${inputCls} min-h-[80px] ${aiLoading ? 'skeleton' : ''}`} placeholder="Research design, methods, data sources, analytical approach…" value={form.methodology} onChange={e => set('methodology', e.target.value)} disabled={aiLoading} />
           </FormField>
@@ -1499,6 +1506,16 @@ function MatrixTable({ papers, onEdit, onDelete, onCite }) {
                     </span>
                   )}
                 </div>
+                {paper.abstract && (
+                  <details className="mt-2.5 text-xs text-ink-3">
+                    <summary className="cursor-pointer hover:text-gold transition-colors font-sans text-[10.5px] font-semibold uppercase tracking-wider select-none outline-none">
+                      View Abstract
+                    </summary>
+                    <p className="mt-1.5 font-sans leading-relaxed text-ink-3 font-normal italic bg-panel p-2.5 border border-rule-dim rounded whitespace-pre-wrap max-w-xs max-h-40 overflow-y-auto">
+                      {paper.abstract}
+                    </p>
+                  </details>
+                )}
               </td>
 
               <td className="py-4 px-4 align-top">
@@ -2474,7 +2491,8 @@ export default function App() {
           key_findings: form.key_findings || '',
           limitations: form.limitations || '',
           citation_key: form.citation_key,
-          relevance_to_my_essay: form.relevance_to_my_essay || ''
+          relevance_to_my_essay: form.relevance_to_my_essay || '',
+          abstract: form.abstract || ''
         });
       } catch (err) {
         console.error('Error syncing paper to Supabase:', err.message);
@@ -2803,7 +2821,7 @@ export default function App() {
               </p>
             </div>
             
-            {/* Tabs for Synthesis Builder & Matrix Grid */}
+            {/* Tabs for Synthesis Builder, Matrix Grid, and Mindmap Graph */}
             <div className="flex border border-rule rounded overflow-hidden text-xs font-sans self-start">
               <button
                 onClick={() => setSynthesisTab('builder')}
@@ -2825,6 +2843,16 @@ export default function App() {
               >
                 Connectivity Grid Map
               </button>
+              <button
+                onClick={() => setSynthesisTab('graph')}
+                className={`px-4 py-1.5 border-l border-rule transition-colors duration-150 ${
+                  synthesisTab === 'graph'
+                    ? 'bg-gold text-canvas font-semibold'
+                    : 'text-gold-dim hover:text-gold'
+                }`}
+              >
+                Obsidian Graph Mindmap
+              </button>
             </div>
           </div>
           
@@ -2840,11 +2868,16 @@ export default function App() {
               onAddGeneratedThemes={addGeneratedThemes}
               onAddTokenLog={addTokenLog}
             />
-          ) : (
+          ) : synthesisTab === 'grid' ? (
             <ThematicGrid
               papers={papers}
               themes={themes}
               onUpdateThemeCitations={updateThemeCitations}
+            />
+          ) : (
+            <CorpusGraph
+              papers={papers}
+              themes={themes}
             />
           )}
         </section>
@@ -3067,4 +3100,364 @@ function AuthScreen({ onLogin, themeMode, toggleTheme }) {
     </div>
   );
 }
+
+function CorpusGraph({ papers, themes }) {
+  const containerRef = useRef(null);
+  const [nodes, setNodes] = useState([]);
+  const [links, setLinks] = useState([]);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [dimensions, setDimensions] = useState({ width: 800, height: 500 });
+  const draggedNodeIndexRef = useRef(null);
+  const animationFrameRef = useRef(null);
+
+  // Setup dimensions
+  useEffect(() => {
+    if (containerRef.current) {
+      setDimensions({
+        width: containerRef.current.clientWidth || 800,
+        height: 500
+      });
+    }
+  }, []);
+
+  // Initialize nodes and links
+  useEffect(() => {
+    if (papers.length === 0 && themes.length === 0) return;
+
+    // 1. Build nodes list
+    const newNodes = [];
+    const nodeMap = new Map(); // key -> index
+
+    // Add Papers
+    papers.forEach(p => {
+      const id = `paper-${p.id}`;
+      newNodes.push({
+        id,
+        type: 'paper',
+        label: p.citation_key || p.title.slice(0, 15),
+        fullName: p.title,
+        abstract: p.abstract || 'No abstract provided.',
+        x: dimensions.width / 2 + (Math.random() - 0.5) * 150,
+        y: dimensions.height / 2 + (Math.random() - 0.5) * 150,
+        vx: 0,
+        vy: 0,
+        radius: 12
+      });
+      nodeMap.set(`paper-${p.citation_key}`, newNodes.length - 1);
+    });
+
+    // Add Themes
+    themes.forEach(t => {
+      const id = `theme-${t.id}`;
+      newNodes.push({
+        id,
+        type: 'theme',
+        label: t.theme_name,
+        fullName: t.theme_name,
+        abstract: t.synthesis_draft || 'No synthesis draft generated yet.',
+        x: dimensions.width / 2 + (Math.random() - 0.5) * 200,
+        y: dimensions.height / 2 + (Math.random() - 0.5) * 200,
+        vx: 0,
+        vy: 0,
+        radius: 16
+      });
+      nodeMap.set(id, newNodes.length - 1);
+    });
+
+    // 2. Build links list
+    const newLinks = [];
+    themes.forEach(t => {
+      const themeNodeId = `theme-${t.id}`;
+      const themeIndex = nodeMap.get(themeNodeId);
+      if (themeIndex === undefined) return;
+
+      (t.linked_citations || []).forEach(citation => {
+        const paperIndex = nodeMap.get(`paper-${citation}`);
+        if (paperIndex !== undefined) {
+          newLinks.push({
+            source: themeIndex,
+            target: paperIndex
+          });
+        }
+      });
+    });
+
+    setNodes(newNodes);
+    setLinks(newLinks);
+  }, [papers, themes, dimensions.width, dimensions.height]);
+
+  // Physics Simulation loop
+  useEffect(() => {
+    if (nodes.length === 0) return;
+
+    const kRepel = 2400; // Repulsion constant
+    const kAttract = 0.05; // Attraction stiffness
+    const kCenter = 0.015; // Center gravity strength
+    const damping = 0.85; // Friction
+
+    const tick = () => {
+      setNodes(prevNodes => {
+        if (prevNodes.length === 0) return prevNodes;
+        // Clone nodes to update velocities and positions
+        const nextNodes = prevNodes.map(n => ({ ...n }));
+
+        // 1. Repulsion force between all node pairs
+        for (let i = 0; i < nextNodes.length; i++) {
+          for (let j = i + 1; j < nextNodes.length; j++) {
+            const dx = nextNodes[j].x - nextNodes[i].x;
+            const dy = nextNodes[j].y - nextNodes[i].y;
+            const distSq = dx * dx + dy * dy + 0.1;
+            const dist = Math.sqrt(distSq);
+
+            if (dist < 350) {
+              // Coulomb-like repulsion force
+              const force = kRepel / (distSq * dist);
+              const fx = force * dx;
+              const fy = force * dy;
+
+              // Apply opposite forces
+              if (draggedNodeIndexRef.current !== i) {
+                nextNodes[i].vx -= fx;
+                nextNodes[i].vy -= fy;
+              }
+              if (draggedNodeIndexRef.current !== j) {
+                nextNodes[j].vx += fx;
+                nextNodes[j].vy += fy;
+              }
+            }
+          }
+        }
+
+        // 2. Attraction force along links
+        links.forEach(link => {
+          const s = nextNodes[link.source];
+          const t = nextNodes[link.target];
+          if (!s || !t) return;
+
+          const dx = t.x - s.x;
+          const dy = t.y - s.y;
+
+          // Spring-like attraction force
+          const fx = kAttract * dx;
+          const fy = kAttract * dy;
+
+          if (draggedNodeIndexRef.current !== link.source) {
+            s.vx += fx;
+            s.vy += fy;
+          }
+          if (draggedNodeIndexRef.current !== link.target) {
+            t.vx -= fx;
+            t.vy -= fy;
+          }
+        });
+
+        // 3. Gravity towards center & Position update
+        const cx = dimensions.width / 2;
+        const cy = dimensions.height / 2;
+
+        for (let i = 0; i < nextNodes.length; i++) {
+          const n = nextNodes[i];
+
+          // Skip position update for dragged node
+          if (draggedNodeIndexRef.current === i) continue;
+
+          // Pull to center
+          n.vx += (cx - n.x) * kCenter;
+          n.vy += (cy - n.y) * kCenter;
+
+          // Update position using velocity
+          n.x += n.vx;
+          n.y += n.vy;
+
+          // Apply damping
+          n.vx *= damping;
+          n.vy *= damping;
+
+          // Bound within viewport
+          n.x = Math.max(n.radius, Math.min(dimensions.width - n.radius, n.x));
+          n.y = Math.max(n.radius, Math.min(dimensions.height - n.radius, n.y));
+        }
+
+        return nextNodes;
+      });
+
+      animationFrameRef.current = requestAnimationFrame(tick);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animationFrameRef.current);
+  }, [nodes.length, links, dimensions.width, dimensions.height]);
+
+  // Drag handlers
+  const handleMouseDown = (e, index) => {
+    e.preventDefault();
+    draggedNodeIndexRef.current = index;
+    setSelectedNode(nodes[index]);
+  };
+
+  const handleMouseMove = (e) => {
+    if (draggedNodeIndexRef.current === null) return;
+    const svgRect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - svgRect.left;
+    const y = e.clientY - svgRect.top;
+
+    setNodes(prev => {
+      const idx = draggedNodeIndexRef.current;
+      if (idx === null || !prev[idx]) return prev;
+      const next = [...prev];
+      next[idx] = {
+        ...next[idx],
+        x: Math.max(next[idx].radius, Math.min(dimensions.width - next[idx].radius, x)),
+        y: Math.max(next[idx].radius, Math.min(dimensions.height - next[idx].radius, y)),
+        vx: 0,
+        vy: 0
+      };
+      return next;
+    });
+  };
+
+  const handleMouseUpOrLeave = () => {
+    draggedNodeIndexRef.current = null;
+  };
+
+  if (papers.length === 0 && themes.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 bg-panel border border-rule rounded-lg gap-2">
+        <p className="font-display italic text-ink-3 text-lg">No nodes to display</p>
+        <p className="text-xs font-sans text-ink-4">Add papers and link themes to view the interactive mindmap graph.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={containerRef} className="bg-panel border border-rule rounded-lg p-5 space-y-4 relative overflow-hidden">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+        <div>
+          <h3 className="font-display text-lg font-semibold text-ink leading-tight">Interactive Research Mindmap</h3>
+          <p className="text-xs font-sans text-ink-3 mt-1">
+            Drag nodes to explore connections. Gold diamonds represent Synthesis Themes; circular frames represent Papers.
+          </p>
+        </div>
+        <div className="flex gap-4 text-xs font-sans self-start">
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-full border border-gold bg-transparent" />
+            <span className="text-ink-2">Paper</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-3.5 h-3.5 rotate-45 border border-gold bg-gold/20" />
+            <span className="text-ink-2">Theme</span>
+          </span>
+        </div>
+      </div>
+
+      <div className="relative border border-rule-dim rounded bg-canvas overflow-hidden h-[520px]">
+        <svg
+          className="w-full h-full cursor-grab active:cursor-grabbing"
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUpOrLeave}
+          onMouseLeave={handleMouseUpOrLeave}
+        >
+          {/* Render Link lines */}
+          {links.map((link, idx) => {
+            const s = nodes[link.source];
+            const t = nodes[link.target];
+            if (!s || !t) return null;
+            return (
+              <line
+                key={`link-${idx}`}
+                x1={s.x}
+                y1={s.y}
+                x2={t.x}
+                y2={t.y}
+                stroke="var(--color-gold)"
+                strokeWidth="1.5"
+                strokeOpacity="0.4"
+              />
+            );
+          })}
+
+          {/* Render Nodes */}
+          {nodes.map((node, idx) => {
+            const isPaper = node.type === 'paper';
+            return (
+              <g
+                key={node.id}
+                transform={`translate(${node.x}, ${node.y})`}
+                onMouseDown={(e) => handleMouseDown(e, idx)}
+                className="select-none group/node cursor-pointer"
+              >
+                {/* Node Shape */}
+                {isPaper ? (
+                  <circle
+                    r={node.radius}
+                    fill="var(--color-canvas)"
+                    stroke="var(--color-gold)"
+                    strokeWidth="2.5"
+                    className="transition-transform group-hover/node:scale-125 duration-200"
+                  />
+                ) : (
+                  <rect
+                    x={-node.radius}
+                    y={-node.radius}
+                    width={node.radius * 2}
+                    height={node.radius * 2}
+                    transform="rotate(45)"
+                    fill="var(--color-gold-wash)"
+                    stroke="var(--color-gold)"
+                    strokeWidth="2.5"
+                    className="transition-transform group-hover/node:scale-125 duration-200"
+                  />
+                )}
+
+                {/* Micro ornament diamond in center */}
+                <circle r="3" fill="var(--color-gold)" />
+
+                {/* Node text label */}
+                <text
+                  y={node.radius + 15}
+                  textAnchor="middle"
+                  className="font-sans text-[10.5px] font-semibold fill-ink-2 select-none pointer-events-none tracking-wide"
+                >
+                  {node.label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+
+        {/* Floating details panel */}
+        {selectedNode && (
+          <div className="absolute bottom-4 left-4 right-4 md:right-auto md:w-96 bg-surface/95 backdrop-blur border border-gold rounded-lg p-5 shadow-2xl space-y-3 animate-fade-in max-h-80 overflow-y-auto">
+            <div className="flex justify-between items-start">
+              <span className="text-[9px] uppercase tracking-widest font-sans text-gold font-bold">
+                {selectedNode.type === 'paper' ? 'Paper Reference' : 'Synthesis Theme'}
+              </span>
+              <button
+                onClick={() => setSelectedNode(null)}
+                className="text-ink-4 hover:text-ink-2 text-sm font-semibold p-1"
+              >
+                ✕
+              </button>
+            </div>
+            <h4 className="font-display text-base font-semibold text-ink leading-snug">
+              {selectedNode.fullName}
+            </h4>
+            
+            <div className="h-px bg-rule-dim" />
+            
+            <div className="space-y-1.5">
+              <p className="text-[10px] uppercase font-sans text-ink-3 tracking-wider font-semibold">
+                {selectedNode.type === 'paper' ? 'Abstract / Synopsis' : 'Synthesis Draft'}
+              </p>
+              <p className="text-xs text-ink-2 leading-relaxed font-sans italic whitespace-pre-wrap">
+                {selectedNode.abstract}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
