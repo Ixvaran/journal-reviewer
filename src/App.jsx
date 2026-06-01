@@ -303,6 +303,139 @@ function formatInTextCitation(paper, style) {
   return `(${lastName}, ${cleanYear})`;
 }
 
+// ─── JSON Sanitization & Repair Helpers ─────────────────────────────────────────
+function sanitizeJsonString(str) {
+  let result = '';
+  let insideString = false;
+  let i = 0;
+  while (i < str.length) {
+    const char = str[i];
+    if (char === '"') {
+      let backslashCount = 0;
+      let j = i - 1;
+      while (j >= 0 && str[j] === '\\') {
+        backslashCount++;
+        j--;
+      }
+      if (backslashCount % 2 === 0) {
+        insideString = !insideString;
+      }
+      result += char;
+      i++;
+    } else if (char === '\\' && insideString) {
+      const nextChar = str[i + 1];
+      if (nextChar === undefined) {
+        result += '\\\\';
+        i++;
+      } else if (['"', '\\', '/', 'b', 'f', 'n', 'r', 't'].includes(nextChar)) {
+        result += char + nextChar;
+        i += 2;
+      } else if (nextChar === 'u') {
+        const hex = str.substring(i + 2, i + 6);
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          result += char + nextChar + hex;
+          i += 6;
+        } else {
+          result += '\\\\';
+          i++;
+        }
+      } else {
+        result += '\\\\';
+        i++;
+      }
+    } else if (char === '\n' && insideString) {
+      result += '\\n';
+      i++;
+    } else if (char === '\r' && insideString) {
+      result += '\\r';
+      i++;
+    } else if (char === '\t' && insideString) {
+      result += '\\t';
+      i++;
+    } else {
+      result += char;
+      i++;
+    }
+  }
+  return result;
+}
+
+function repairTruncatedJson(str) {
+  const sanitized = sanitizeJsonString(str);
+  try {
+    return JSON.parse(sanitized);
+  } catch (e) {
+    // Attempt repair
+  }
+
+  let insideString = false;
+  let stack = [];
+  let i = 0;
+  while (i < sanitized.length) {
+    const char = sanitized[i];
+    if (char === '"') {
+      let backslashCount = 0;
+      let j = i - 1;
+      while (j >= 0 && sanitized[j] === '\\') {
+        backslashCount++;
+        j--;
+      }
+      if (backslashCount % 2 === 0) {
+        insideString = !insideString;
+      }
+    } else if (!insideString) {
+      if (char === '{' || char === '[') {
+        stack.push(char);
+      } else if (char === '}') {
+        if (stack[stack.length - 1] === '{') {
+          stack.pop();
+        }
+      } else if (char === ']') {
+        if (stack[stack.length - 1] === '[') {
+          stack.pop();
+        }
+      }
+    }
+    i++;
+  }
+
+  let repaired = sanitized;
+  if (insideString) {
+    repaired += '"';
+  }
+
+  while (stack.length > 0) {
+    const open = stack.pop();
+    if (open === '{') {
+      repaired += '}';
+    } else if (open === '[') {
+      repaired += ']';
+    }
+  }
+
+  try {
+    return JSON.parse(repaired);
+  } catch (e) {
+    let cleanedRepaired = repaired.trim();
+    const trailingKeyRegex = /,\s*"[^"]*"\s*}$/;
+    if (trailingKeyRegex.test(cleanedRepaired)) {
+      cleanedRepaired = cleanedRepaired.replace(trailingKeyRegex, '}');
+      try {
+        return JSON.parse(cleanedRepaired);
+      } catch (innerErr) {}
+    }
+    
+    const trailingCommaRegex = /,\s*([}\]])/g;
+    if (trailingCommaRegex.test(repaired)) {
+      cleanedRepaired = repaired.replace(trailingCommaRegex, '$1');
+      try {
+        return JSON.parse(cleanedRepaired);
+      } catch (innerErr) {}
+    }
+    throw e;
+  }
+}
+
 // ─── Shared Style Constants ───────────────────────────────────────────────────
 const inputCls = [
   "w-full bg-raised border border-rule rounded px-3 py-2",
@@ -568,6 +701,8 @@ function PaperFormModal({ dialogRef, initial, onSave, onAddTokenLog }) {
   const [abstractText, setAbstractText] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
+  const [rawResponse, setRawResponse] = useState('');
+  const [showRaw, setShowRaw] = useState(false);
   // PDF upload state
   const [inputMode, setInputMode] = useState('paste'); // 'paste' | 'upload'
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -596,6 +731,8 @@ function PaperFormModal({ dialogRef, initial, onSave, onAddTokenLog }) {
     }
     setAbstractText('');
     setAiError('');
+    setRawResponse('');
+    setShowRaw(false);
     setInputMode('paste');
     setPdfInfo(null);
   }, [initial]);
@@ -644,6 +781,8 @@ function PaperFormModal({ dialogRef, initial, onSave, onAddTokenLog }) {
 
     setAiLoading(true);
     setAiError('');
+    setRawResponse('');
+    setShowRaw(false);
 
     const systemPrompt = `You are an expert academic reviewer. Analyze the provided text and return ONLY a valid JSON object with exactly these eleven keys:
 {
@@ -664,25 +803,36 @@ function PaperFormModal({ dialogRef, initial, onSave, onAddTokenLog }) {
   "key_findings": "<3-5 bullet-point summary of the main results and contributions>",
   "limitations": "<2-4 key limitations, constraints, or caveats acknowledged or apparent from the work>"
 }
-No markdown, no code fences, no extra keys, no explanation — only the raw JSON object. CRITICAL: All double quotes inside string values must be escaped (e.g. use \\\" instead of \") and all newlines must be escaped as \\n to ensure it is valid parsable JSON.`;
+No markdown, no code fences, no extra keys, no explanation — only the raw JSON object.
+CRITICAL FORMATTING RULES:
+1. Do NOT use LaTeX formatting or math formulas containing backslashes (\\) anywhere in your response. Instead of '\\alpha', write 'alpha'. Instead of '\\sum', write 'sum'. Instead of '\\beta', write 'beta'. Any backslash in your response will cause the JSON parser to fail.
+2. All double quotes inside string values must be escaped (use \\\" instead of \") and all newlines must be escaped as \\n to ensure it is valid parsable JSON.`;
 
     try {
       const model = localStorage.getItem('ds_model') || 'deepseek-chat';
+      const body = {
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: abstractText },
+        ],
+        temperature: 0.3,
+      };
+
+      if (model === 'deepseek-reasoner') {
+        body.max_tokens = 8000;
+      } else {
+        body.max_tokens = 4000;
+        body.response_format = { type: 'json_object' };
+      }
+
       const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: abstractText },
-          ],
-          temperature: 0.3,
-          max_tokens: 3000,
-        }),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -693,9 +843,9 @@ No markdown, no code fences, no extra keys, no explanation — only the raw JSON
       const data = await res.json();
       const raw = data.choices?.[0]?.message?.content || '';
       console.log("Raw AI response content:", raw);
+      setRawResponse(raw);
       let cleaned = raw.trim();
       
-      // Robust JSON extraction: locate the outermost curly braces
       const firstBrace = cleaned.indexOf('{');
       const lastBrace = cleaned.lastIndexOf('}');
       if (firstBrace !== -1 && lastBrace !== -1) {
@@ -706,16 +856,14 @@ No markdown, no code fences, no extra keys, no explanation — only the raw JSON
 
       let parsed;
       try {
-        parsed = JSON.parse(cleaned);
+        parsed = repairTruncatedJson(cleaned);
       } catch (parseErr) {
         console.error("JSON parsing failed. Cleaned string tried to parse:", cleaned);
-        throw new Error(`Analysis failed: ${parseErr.message}. The AI returned invalid JSON syntax. Please check the browser console for details.`);
+        throw new Error(`The AI returned invalid JSON syntax. Detail: ${parseErr.message}`);
       }
 
       setForm(p => ({
         ...p,
-        // ── Bibliographic fields: fill only if the user hasn't typed anything
-        //    (safe to use when editing — won't clobber existing data. Safe fallback for undefined properties)
         title:        (!(p.title || '').trim()        && parsed.title)
                         ? String(parsed.title)
                         : p.title,
@@ -733,19 +881,16 @@ No markdown, no code fences, no extra keys, no explanation — only the raw JSON
                         : p.category,
         suggested_themes: parsed.suggested_themes || [],
         key_quotes:       parsed.key_quotes || [],
-        // ── Analytical fields: always overwrite with AI output
         abstract:     parsed.abstract ? String(parsed.abstract).replace(/\\n/g, '\n') : p.abstract,
         methodology:  parsed.methodology ? String(parsed.methodology).replace(/\\n/g, '\n') : p.methodology,
         key_findings: parsed.key_findings ? String(parsed.key_findings).replace(/\\n/g, '\n') : p.key_findings,
         limitations:  parsed.limitations ? String(parsed.limitations).replace(/\\n/g, '\n') : p.limitations,
       }));
 
-      // Pre-select all proposed themes by default
       if (parsed.suggested_themes) {
         setSelectedThemesToCreate(parsed.suggested_themes);
       }
 
-      // Log token usage if returned by API
       const usage = data.usage;
       if (usage && onAddTokenLog) {
         const finalTitle = (form.title || '').trim() || parsed.title || 'Untitled';
@@ -760,7 +905,7 @@ No markdown, no code fences, no extra keys, no explanation — only the raw JSON
         });
       }
     } catch (err) {
-      setAiError(`Analysis failed: ${err.message}`);
+      setAiError(err.message);
     } finally {
       setAiLoading(false);
     }
@@ -911,9 +1056,24 @@ No markdown, no code fences, no extra keys, no explanation — only the raw JSON
 
             {/* Error message */}
             {aiError && (
-              <p className="text-xs font-sans text-rouge bg-rouge-wash border border-rouge-rule rounded px-3 py-2 leading-relaxed">
-                {aiError}
-              </p>
+              <div className="text-xs font-sans text-rouge bg-rouge-wash border border-rouge-rule rounded px-3 py-2 leading-relaxed space-y-2">
+                <p>{aiError}</p>
+                {rawResponse && (
+                  <div>
+                    <button
+                      onClick={() => setShowRaw(p => !p)}
+                      className="text-[10.5px] font-sans font-semibold uppercase tracking-wider text-rouge hover:underline focus:outline-none"
+                    >
+                      {showRaw ? 'hide raw ai response' : 'show raw ai response'}
+                    </button>
+                    {showRaw && (
+                      <pre className="mt-2 p-2 bg-rouge/10 font-mono text-[10px] overflow-auto max-h-48 rounded border border-rouge-rule/30 whitespace-pre-wrap text-rouge select-all">
+                        {rawResponse}
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Auto-fill button — only relevant once there's text */}
@@ -1629,21 +1789,29 @@ No markdown formatting, no code fences, no extra text, only the raw JSON array.`
 
     try {
       const model = localStorage.getItem('ds_model') || 'deepseek-chat';
+      const body = {
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Here is the corpus of papers to analyze:\n\n${paperList}` },
+        ],
+        temperature: 0.6,
+      };
+
+      if (model === 'deepseek-reasoner') {
+        body.max_tokens = 8000;
+      } else {
+        body.max_tokens = 4000;
+        body.response_format = { type: 'json_object' };
+      }
+
       const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: `Here is the corpus of papers to analyze:\n\n${paperList}` },
-          ],
-          temperature: 0.6,
-          max_tokens: 3000,
-        }),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -1663,7 +1831,7 @@ No markdown formatting, no code fences, no extra text, only the raw JSON array.`
         cleaned = cleaned.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
       }
 
-      const parsed = JSON.parse(cleaned);
+      const parsed = repairTruncatedJson(cleaned);
       if (Array.isArray(parsed)) {
         const newThemes = parsed.map(t => ({
           id: Date.now() + Math.random(),
