@@ -664,7 +664,7 @@ function PaperFormModal({ dialogRef, initial, onSave, onAddTokenLog }) {
   "key_findings": "<3-5 bullet-point summary of the main results and contributions>",
   "limitations": "<2-4 key limitations, constraints, or caveats acknowledged or apparent from the work>"
 }
-No markdown, no code fences, no extra keys, no explanation — only the raw JSON object.`;
+No markdown, no code fences, no extra keys, no explanation — only the raw JSON object. CRITICAL: All double quotes inside string values must be escaped (e.g. use \\\" instead of \") and all newlines must be escaped as \\n to ensure it is valid parsable JSON.`;
 
     try {
       const model = localStorage.getItem('ds_model') || 'deepseek-chat';
@@ -692,6 +692,7 @@ No markdown, no code fences, no extra keys, no explanation — only the raw JSON
 
       const data = await res.json();
       const raw = data.choices?.[0]?.message?.content || '';
+      console.log("Raw AI response content:", raw);
       let cleaned = raw.trim();
       
       // Robust JSON extraction: locate the outermost curly braces
@@ -702,7 +703,14 @@ No markdown, no code fences, no extra keys, no explanation — only the raw JSON
       } else {
         cleaned = cleaned.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
       }
-      const parsed = JSON.parse(cleaned);
+
+      let parsed;
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch (parseErr) {
+        console.error("JSON parsing failed. Cleaned string tried to parse:", cleaned);
+        throw new Error(`Analysis failed: ${parseErr.message}. The AI returned invalid JSON syntax. Please check the browser console for details.`);
+      }
 
       setForm(p => ({
         ...p,
