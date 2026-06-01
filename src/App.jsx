@@ -2841,6 +2841,11 @@ function AppContent() {
     }
   }, [user]);
 
+  const openDeleteTheme = useCallback((theme) => {
+    setPendingDelete({ type: 'theme', item: theme });
+    setTimeout(() => confirmDialogRef.current?.showModal(), 0);
+  }, []);
+
   const totalGraphCitations = useMemo(() => {
     let count = 0;
     if (Array.isArray(themes)) {
