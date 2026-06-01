@@ -1446,6 +1446,7 @@ Paper: ${p.title}
 Authors: ${p.authors}
 Year: ${p.year}
 Citation Key: [${p.citation_key}]
+Expected In-Text Citation: ${formatInTextCitation(p, style)}
 Methodology: ${p.methodology}
 Key Findings: ${p.key_findings}
 Relevance: ${p.relevance_to_my_essay}
@@ -1458,7 +1459,7 @@ You must integrate the insights, methodologies, and contributions of the provide
 Guidelines:
 1. Write a single, well-structured academic paragraph (or maximum two paragraphs if highly complex).
 2. Synthesize similarities, contrasts, and relationships between the papers. Do NOT just list summaries of one paper after another.
-3. Integrate parenthetical in-text citations naturally matching the ${style} format (e.g. '(Vaswani et al., 2017)' for APA, or '(Vaswani et al., 2017)' for Harvard).
+3. Integrate the exact expected in-text citations provided for each paper (e.g. use the format specified under 'Expected In-Text Citation' for that paper, such as '${style === 'APA' ? '(Vaswani et al., 2017)' : '(Vaswani et al., 2017)'}'). Do NOT write raw citation keys like '[vaswani2017attention]' or generic author names without years.
 4. Output ONLY the raw paragraph text. No markdown formatting, no code fences, no introductory remarks.
 5. Maintain a professional, high-quality scholarly tone.`;
 
@@ -1764,6 +1765,7 @@ Paper: ${p.title}
 Authors: ${p.authors}
 Year: ${p.year}
 Citation Key: [${p.citation_key}]
+Expected In-Text Citation: ${formatInTextCitation(p, bibStyle)}
 Category: ${p.category}
 Methodology: ${p.methodology}
 Key Findings: ${p.key_findings}
@@ -1774,7 +1776,7 @@ Suggested Themes: ${(p.suggested_themes || []).join(', ')}
 For each theme, you must:
 1. Provide a name for the theme (e.g. "Compute Scaling Bottlenecks").
 2. Determine which papers from the corpus support or relate to this theme (represented as a list of citation keys). A paper can be linked to multiple themes, and a theme must contain at least one paper.
-3. Write a cohesive academic synthesis paragraph (synthesis draft) that weaves the linked papers together with natural in-text citations.
+3. Write a cohesive academic synthesis paragraph (synthesis draft) that weaves the linked papers together with natural in-text citations. Integrate the exact expected in-text citations provided for each paper (e.g. use the format specified under 'Expected In-Text Citation' for that paper, such as '${bibStyle === 'APA' ? '(Vaswani et al., 2017)' : '(Vaswani et al., 2017)'}'). Do NOT write raw citation keys like '[vaswani2017attention]' or generic author names without years.
 
 Return ONLY a valid JSON array of objects with exactly this structure:
 [
@@ -1913,6 +1915,7 @@ Paper: ${p.title}
 Authors: ${p.authors}
 Year: ${p.year}
 Citation Key: [${p.citation_key}]
+Expected In-Text Citation: ${formatInTextCitation(p, bibStyle)}
 Methodology: ${p.methodology}
 Key Findings: ${p.key_findings}
 Relevance: ${p.relevance_to_my_essay}
@@ -1928,7 +1931,7 @@ You must incorporate the user's specific instruction to revise the text.
 Guidelines:
 1. Modify the existing draft based on the instructions. Keep the style academic, cohesive, and intellectually rigorous.
 2. Ensure you still integrate the insights, methodologies, and contributions of the provided papers.
-3. Keep parenthetical in-text citations matching the ${bibStyle} format.
+3. Integrate the exact expected in-text citations provided for each paper (e.g. use the format specified under 'Expected In-Text Citation' for that paper, such as '${bibStyle === 'APA' ? '(Vaswani et al., 2017)' : '(Vaswani et al., 2017)'}'). Do NOT write raw citation keys like '[vaswani2017attention]' or generic author names without years.
 4. Output ONLY the revised raw paragraph text. No markdown formatting, no code fences, no introductory remarks.
 5. Maintain a professional, high-quality scholarly tone.`;
 
@@ -1940,7 +1943,7 @@ You must integrate the insights, methodologies, and contributions of the provide
 Guidelines:
 1. Write a single, well-structured academic paragraph (or maximum two paragraphs if highly complex).
 2. Synthesize similarities, contrasts, and relationships between the papers. Do NOT just list summaries of one paper after another.
-3. Integrate parenthetical in-text citations naturally matching the ${bibStyle} format (e.g. '(Vaswani et al., 2017)' for APA, or '(Vaswani et al., 2017)' for Harvard).
+3. Integrate the exact expected in-text citations provided for each paper (e.g. use the format specified under 'Expected In-Text Citation' for that paper, such as '${bibStyle === 'APA' ? '(Vaswani et al., 2017)' : '(Vaswani et al., 2017)'}'). Do NOT write raw citation keys like '[vaswani2017attention]' or generic author names without years.
 4. Output ONLY the raw paragraph text. No markdown formatting, no code fences, no introductory remarks.
 5. Maintain a professional, high-quality scholarly tone.`;
 
@@ -2838,10 +2841,21 @@ export default function App() {
     }
   }, [user]);
 
-  const openDeleteTheme = useCallback((theme) => {
-    setPendingDelete({ type: 'theme', item: theme });
-    setTimeout(() => confirmDialogRef.current?.showModal(), 0);
-  }, []);
+  const totalGraphCitations = useMemo(() => {
+    let count = 0;
+    themes.forEach(t => {
+      count += (t.linked_citations || []).length;
+    });
+    return count;
+  }, [themes]);
+
+  const totalQuotesCount = useMemo(() => {
+    let count = 0;
+    papers.forEach(p => {
+      count += (p.key_quotes || []).length;
+    });
+    return count;
+  }, [papers]);
 
   if (supabase && authLoading) {
     return (
@@ -2963,6 +2977,81 @@ export default function App() {
 
       {/* ── Main ─────────────────────────────────────────────────── */}
       <main className="flex-1 max-w-[1600px] mx-auto w-full px-5 sm:px-8 py-7 space-y-9">
+
+        {/* ── Hero Section & Dashboard ── */}
+        <section className="space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div>
+              <h1 className="font-display text-3xl italic font-medium tracking-wide text-ink">
+                Athenaeum Workspace
+              </h1>
+              <p className="text-xs font-sans text-ink-3 mt-1.5 leading-relaxed max-w-xl">
+                Welcome back, scholar. Synthesize literature reviews, map conceptual connections, and generate citations seamlessly. All progress is synchronized to your academic ledger.
+              </p>
+            </div>
+            {/* Supabase connection indicator */}
+            <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded border border-rule-dim bg-panel/50 text-[10.5px] font-sans text-ink-3">
+              <span className={`w-2 h-2 rounded-full ${supabase && user ? 'bg-gold animate-pulse' : 'bg-ink-4'}`} />
+              <span>{supabase && user ? 'Academic Sync Active' : 'Offline Mode'}</span>
+            </div>
+          </div>
+
+          {/* Stats Dashboard Grid */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 p-5 rounded border border-rule-dim bg-panel/30 backdrop-blur-sm select-none">
+            {/* Card 1: Total Papers */}
+            <div className="flex items-center gap-4 p-1">
+              <div className="w-10 h-10 rounded bg-gold-wash flex items-center justify-center text-gold shrink-0 border border-gold-rule">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-[9.5px] font-sans uppercase tracking-[0.14em] text-ink-3">Corpus Papers</p>
+                <p className="font-display text-xl font-bold text-ink mt-0.5">{papers.length}</p>
+              </div>
+            </div>
+
+            {/* Card 2: Active Themes */}
+            <div className="flex items-center gap-4 p-1 border-l border-rule-dim pl-4">
+              <div className="w-10 h-10 rounded bg-gold-wash flex items-center justify-center text-gold shrink-0 border border-gold-rule">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581a2.25 2.25 0 003.182 0l4.318-4.318a2.25 2.25 0 000-3.182l-9.58-9.581A2.25 2.25 0 009.568 3z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 7.5h.008v.008H6V7.5z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-[9.5px] font-sans uppercase tracking-[0.14em] text-ink-3">Synthesis Themes</p>
+                <p className="font-display text-xl font-bold text-ink mt-0.5">{themes.length}</p>
+              </div>
+            </div>
+
+            {/* Card 3: Connected Nodes */}
+            <div className="flex items-center gap-4 p-1 border-t lg:border-t-0 lg:border-l border-rule-dim pt-3 lg:pt-0 lg:pl-4 col-span-1">
+              <div className="w-10 h-10 rounded bg-gold-wash flex items-center justify-center text-gold shrink-0 border border-gold-rule">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94-3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-[9.5px] font-sans uppercase tracking-[0.14em] text-ink-3">Graph Density</p>
+                <p className="font-display text-xl font-bold text-ink mt-0.5">{totalGraphCitations} Links</p>
+              </div>
+            </div>
+
+            {/* Card 4: Key Quotes */}
+            <div className="flex items-center gap-4 p-1 border-t lg:border-t-0 lg:border-l border-rule-dim pt-3 lg:pt-0 lg:pl-4 col-span-1">
+              <div className="w-10 h-10 rounded bg-gold-wash flex items-center justify-center text-gold shrink-0 border border-gold-rule">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-[9.5px] font-sans uppercase tracking-[0.14em] text-ink-3">Extracted Insights</p>
+                <p className="font-display text-xl font-bold text-ink mt-0.5">{totalQuotesCount} Quotes</p>
+              </div>
+            </div>
+          </div>
+        </section>
 
         {/* § Literature Review Matrix */}
         <section>
