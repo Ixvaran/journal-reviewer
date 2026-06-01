@@ -33,18 +33,28 @@ async function extractPdfText(file, maxPages = 8) {
     const page = await pdf.getPage(n);
     const content = await page.getTextContent();
 
-    // Group text items by vertical position to reconstruct lines
-    const byY = {};
-    for (const item of content.items) {
-      if (!('str' in item) || !item.str.trim()) continue;
-      const y = Math.round(item.transform[5] / 4) * 4; // snap to 4px grid
-      if (!byY[y]) byY[y] = [];
-      byY[y].push({ x: item.transform[4], s: item.str });
+    // Group text items by vertical position to reconstruct lines (with threshold to preserve sub/superscripts)
+    const items = content.items.filter(item => 'str' in item && item.str.trim());
+    // Sort strictly by Y descending (top of page to bottom)
+    items.sort((a, b) => b.transform[5] - a.transform[5]);
+
+    const lineGroups = [];
+    for (const item of items) {
+      const y = item.transform[5];
+      // Find a group whose Y is within 7px of this item's Y
+      let group = lineGroups.find(g => Math.abs(g.y - y) <= 7);
+      if (group) {
+        group.items.push(item);
+      } else {
+        lineGroups.push({ y, items: [item] });
+      }
     }
-    const ys = Object.keys(byY).map(Number).sort((a, b) => b - a);
-    const lines = ys
-      .map(y => byY[y].sort((a, b) => a.x - b.x).map(i => i.s).join(' ').trim())
-      .filter(Boolean);
+
+    // Sort each group left-to-right (X ascending) and join strings
+    const lines = lineGroups.map(group => {
+      group.items.sort((a, b) => a.transform[4] - b.transform[4]);
+      return group.items.map(i => i.str).join(' ').trim();
+    }).filter(Boolean);
     pageTexts.push(lines.join('\n'));
   }
 
