@@ -2266,9 +2266,38 @@ export default function App() {
     setThemeMode(prev => prev === 'dark' ? 'light' : 'dark');
   }, []);
 
-  // Fetch initial data from Supabase if active
+  // Auth state
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // Monitor auth state changes
   useEffect(() => {
-    if (supabase) {
+    if (!supabase) {
+      setAuthLoading(false);
+      return;
+    }
+    
+    // Check current session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    }).catch(err => {
+      console.error("Auth init error:", err);
+      setAuthLoading(false);
+    });
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Fetch initial data from Supabase if active & user is logged in
+  useEffect(() => {
+    if (supabase && user) {
       console.log("Supabase connection detected. Fetching data...");
       
       const fetchData = async () => {
@@ -2279,9 +2308,7 @@ export default function App() {
             .select('*')
             .order('created_at', { ascending: true });
           if (papersError) throw papersError;
-          if (papersData && papersData.length > 0) {
-            setPapers(papersData);
-          }
+          setPapers(papersData || []);
 
           // Fetch themes
           const { data: themesData, error: themesError } = await supabase
@@ -2289,9 +2316,7 @@ export default function App() {
             .select('*')
             .order('created_at', { ascending: true });
           if (themesError) throw themesError;
-          if (themesData && themesData.length > 0) {
-            setThemes(themesData);
-          }
+          setThemes(themesData || []);
 
           // Fetch logs
           const { data: logsData, error: logsError } = await supabase
@@ -2299,17 +2324,30 @@ export default function App() {
             .select('*')
             .order('created_at', { ascending: false });
           if (logsError) throw logsError;
-          if (logsData) {
-            setTokenLogs(logsData);
-          }
+          setTokenLogs(logsData || []);
         } catch (err) {
           console.error("Error loading data from Supabase:", err.message);
         }
       };
 
       fetchData();
+    } else if (!user) {
+      // offline-first loader
+      if (!supabase) {
+        const saved = localStorage.getItem('lit_papers');
+        setPapers(saved ? JSON.parse(saved) : SEED_PAPERS);
+        const savedThemes = localStorage.getItem('lit_themes');
+        setThemes(savedThemes ? JSON.parse(savedThemes) : SEED_THEMES);
+        const savedLogs = localStorage.getItem('lit_token_logs');
+        setTokenLogs(savedLogs ? JSON.parse(savedLogs) : []);
+      } else {
+        // online, not logged in yet: blank states
+        setPapers([]);
+        setThemes([]);
+        setTokenLogs([]);
+      }
     }
-  }, []);
+  }, [user]);
 
   // Token Usage Ledger State
   const [tokenLogs, setTokenLogs] = useState(() => {
@@ -2320,14 +2358,14 @@ export default function App() {
   const clearTokenLogs = useCallback(async () => {
     setTokenLogs([]);
     localStorage.removeItem('lit_token_logs');
-    if (supabase) {
+    if (supabase && user) {
       try {
-        await supabase.from('token_logs').delete().gt('id', 0);
+        await supabase.from('token_logs').delete().eq('user_id', user.id);
       } catch (err) {
         console.error('Error clearing token logs from Supabase:', err.message);
       }
     }
-  }, []);
+  }, [user]);
 
   const addTokenLog = useCallback(async (log) => {
     setTokenLogs(prev => {
@@ -2335,10 +2373,11 @@ export default function App() {
       localStorage.setItem('lit_token_logs', JSON.stringify(updated));
       return updated;
     });
-    if (supabase) {
+    if (supabase && user) {
       try {
         await supabase.from('token_logs').insert({
           id: log.id,
+          user_id: user.id,
           timestamp: log.timestamp,
           activity: log.activity,
           model: log.model,
@@ -2350,7 +2389,7 @@ export default function App() {
         console.error('Error syncing log to Supabase:', err.message);
       }
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     localStorage.setItem('lit_papers', JSON.stringify(papers));
@@ -2410,10 +2449,11 @@ export default function App() {
       return exists ? prev.map(p => p.id === form.id ? form : p) : [...prev, form];
     });
 
-    if (supabase) {
+    if (supabase && user) {
       try {
         await supabase.from('papers').upsert({
           id: form.id,
+          user_id: user.id,
           title: form.title,
           authors: form.authors || '',
           year: form.year,
@@ -2464,42 +2504,45 @@ export default function App() {
         return updated;
       });
 
-      if (supabase) {
+      if (supabase && user) {
         try {
           for (const ut of updatedThemes) {
-            await supabase.from('themes').update({ linked_citations: ut.linked_citations }).eq('id', ut.id);
+            await supabase.from('themes').update({ linked_citations: ut.linked_citations }).eq('id', ut.id).eq('user_id', user.id);
           }
           for (const ct of createdThemes) {
-            await supabase.from('themes').insert(ct);
+            await supabase.from('themes').insert({
+              ...ct,
+              user_id: user.id
+            });
           }
         } catch (err) {
           console.error('Error syncing auto-themes to Supabase:', err.message);
         }
       }
     }
-  }, []);
+  }, [user]);
 
   const updateThemeDraft = useCallback(async (themeId, draftText) => {
     setThemes(prev => prev.map(t => t.id === themeId ? { ...t, synthesis_draft: draftText } : t));
-    if (supabase) {
+    if (supabase && user) {
       try {
-        await supabase.from('themes').update({ synthesis_draft: draftText }).eq('id', themeId);
+        await supabase.from('themes').update({ synthesis_draft: draftText }).eq('id', themeId).eq('user_id', user.id);
       } catch (err) {
         console.error('Error updating draft in Supabase:', err.message);
       }
     }
-  }, []);
+  }, [user]);
 
   const updateThemeCitations = useCallback(async (themeId, citations) => {
     setThemes(prev => prev.map(t => t.id === themeId ? { ...t, linked_citations: citations } : t));
-    if (supabase) {
+    if (supabase && user) {
       try {
-        await supabase.from('themes').update({ linked_citations: citations }).eq('id', themeId);
+        await supabase.from('themes').update({ linked_citations: citations }).eq('id', themeId).eq('user_id', user.id);
       } catch (err) {
         console.error('Error updating citations in Supabase:', err.message);
       }
     }
-  }, []);
+  }, [user]);
 
   const addGeneratedThemes = useCallback(async (newThemes) => {
     setThemes(prev => {
@@ -2513,11 +2556,12 @@ export default function App() {
       return updated;
     });
 
-    if (supabase) {
+    if (supabase && user) {
       try {
         for (const nt of newThemes) {
           await supabase.from('themes').upsert({
             id: nt.id,
+            user_id: user.id,
             theme_name: nt.theme_name,
             linked_citations: nt.linked_citations,
             synthesis_draft: nt.synthesis_draft
@@ -2527,7 +2571,7 @@ export default function App() {
         console.error('Error syncing generated themes to Supabase:', err.message);
       }
     }
-  }, []);
+  }, [user]);
 
   const openDeletePaper = useCallback((paper) => {
     setPendingDelete({ type: 'paper', item: paper });
@@ -2538,25 +2582,25 @@ export default function App() {
     if (!pendingDelete) return;
     if (pendingDelete.type === 'paper') {
       setPapers(prev => prev.filter(p => p.id !== pendingDelete.item.id));
-      if (supabase) {
+      if (supabase && user) {
         try {
-          await supabase.from('papers').delete().eq('id', pendingDelete.item.id);
+          await supabase.from('papers').delete().eq('id', pendingDelete.item.id).eq('user_id', user.id);
         } catch (err) {
           console.error('Error deleting paper from Supabase:', err.message);
         }
       }
     } else if (pendingDelete.type === 'theme') {
       setThemes(prev => prev.filter(t => t.id !== pendingDelete.item.id));
-      if (supabase) {
+      if (supabase && user) {
         try {
-          await supabase.from('themes').delete().eq('id', pendingDelete.item.id);
+          await supabase.from('themes').delete().eq('id', pendingDelete.item.id).eq('user_id', user.id);
         } catch (err) {
           console.error('Error deleting theme from Supabase:', err.message);
         }
       }
     }
     setPendingDelete(null);
-  }, [pendingDelete]);
+  }, [pendingDelete, user]);
 
   // Theme actions
   const openAddTheme = useCallback(() => {
@@ -2575,10 +2619,11 @@ export default function App() {
       return exists ? prev.map(t => t.id === form.id ? form : t) : [...prev, form];
     });
 
-    if (supabase) {
+    if (supabase && user) {
       try {
         await supabase.from('themes').upsert({
           id: form.id,
+          user_id: user.id,
           theme_name: form.theme_name,
           linked_citations: form.linked_citations,
           synthesis_draft: form.synthesis_draft
@@ -2587,12 +2632,28 @@ export default function App() {
         console.error('Error syncing theme to Supabase:', err.message);
       }
     }
-  }, []);
+  }, [user]);
 
   const openDeleteTheme = useCallback((theme) => {
     setPendingDelete({ type: 'theme', item: theme });
     setTimeout(() => confirmDialogRef.current?.showModal(), 0);
   }, []);
+
+  if (supabase && authLoading) {
+    return (
+      <div className="min-h-dvh flex flex-col bg-canvas justify-center items-center">
+        <div className="page-crown" aria-hidden="true" />
+        <div className="text-center space-y-4">
+          <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="font-display italic text-ink-3 text-base tracking-wide">Retrieving scholar record...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (supabase && !user) {
+    return <AuthScreen onLogin={setUser} themeMode={themeMode} toggleTheme={toggleTheme} />;
+  }
 
   return (
     <div className="min-h-dvh flex flex-col bg-canvas">
@@ -2638,6 +2699,24 @@ export default function App() {
 
           {/* Header actions */}
           <div className="flex items-center gap-2 ml-auto">
+            {supabase && user && (
+              <div className="hidden md:flex items-center gap-2.5 mr-2">
+                <span className="text-xs font-sans text-ink-3 italic" title={user.email}>
+                  {user.email.length > 20 ? user.email.slice(0, 18) + '...' : user.email}
+                </span>
+                <div className="h-3 w-px bg-rule-dim" />
+                <button
+                  onClick={async () => {
+                    await supabase.auth.signOut();
+                  }}
+                  className="text-xs font-sans font-semibold text-gold hover:text-gold-dim transition-colors"
+                  title="Sign Out"
+                >
+                  Sign Out
+                </button>
+              </div>
+            )}
+            
             <button
               onClick={openAddPaper}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-gold hover:bg-gold-dim text-canvas text-sm font-semibold transition-all duration-200 shadow-[0_2px_10px_oklch(73%_0.13_76/20%)]"
@@ -2659,6 +2738,21 @@ export default function App() {
             >
               <IconSettings />
             </button>
+
+            {/* Mobile Sign Out button */}
+            {supabase && user && (
+              <button
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                }}
+                className="md:hidden p-2 rounded text-red-400 hover:text-red-300 hover:bg-panel transition-all duration-200"
+                title="Sign Out"
+              >
+                <svg className="w-5.5 h-5.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -2798,3 +2892,147 @@ export default function App() {
     </div>
   );
 }
+
+function AuthScreen({ onLogin, themeMode, toggleTheme }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setMessage(null);
+    setLoading(true);
+
+    try {
+      if (isSignUp) {
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+        if (signUpError) throw signUpError;
+        setMessage("Verification link sent! Please check your email to activate your account.");
+      } else {
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (signInError) throw signInError;
+        if (data?.user) {
+          onLogin(data.user);
+        }
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-dvh flex flex-col bg-canvas justify-center items-center px-4 relative">
+      <div className="page-crown" aria-hidden="true" />
+      
+      {/* Night/Light mode toggle on login screen */}
+      <div className="absolute top-4 right-4">
+        <button
+          onClick={toggleTheme}
+          className="p-2 rounded text-ink-3 hover:text-ink-2 hover:bg-panel transition-all duration-200"
+          title={themeMode === 'dark' ? "Switch to Light Mode" : "Switch to Night Mode"}
+        >
+          {themeMode === 'dark' ? <IconSun /> : <IconMoon />}
+        </button>
+      </div>
+
+      <div className="w-full max-w-md bg-surface border border-rule rounded-lg shadow-xl p-8 space-y-6 relative overflow-hidden">
+        {/* Decorative corner borders */}
+        <div className="absolute top-0 left-0 w-8 h-8 border-t border-l border-gold/30 rounded-tl-lg" />
+        <div className="absolute top-0 right-0 w-8 h-8 border-t border-r border-gold/30 rounded-tr-lg" />
+        <div className="absolute bottom-0 left-0 w-8 h-8 border-b border-l border-gold/30 rounded-bl-lg" />
+        <div className="absolute bottom-0 right-0 w-8 h-8 border-b border-r border-gold/30 rounded-br-lg" />
+
+        <div className="text-center space-y-2">
+          <div className="text-gold text-sm select-none">◆</div>
+          <h1 className="font-display text-2xl font-semibold text-ink tracking-wide">
+            LitReview <span className="text-ink-3 font-normal italic">Matrix</span>
+          </h1>
+          <p className="text-[10px] font-sans text-ink-3 uppercase tracking-widest">
+            Scholar Portal Authentication
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <div className="p-3.5 text-xs rounded bg-red-950/20 border border-red-500/30 text-red-400 font-sans leading-relaxed">
+              {error}
+            </div>
+          )}
+          {message && (
+            <div className="p-3.5 text-xs rounded bg-gold/10 border border-gold/30 text-gold font-sans leading-relaxed">
+              {message}
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-sans font-semibold text-ink-3 uppercase tracking-wider block">
+              Email Address
+            </label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="scholar@academy.edu"
+              className="w-full bg-panel border border-rule-dim rounded px-3 py-2 text-sm font-sans text-ink-2 placeholder-ink-4 focus:outline-none focus:ring-1 focus:ring-gold focus:border-gold"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-sans font-semibold text-ink-3 uppercase tracking-wider block">
+              Password
+            </label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full bg-panel border border-rule-dim rounded px-3 py-2 text-sm font-sans text-ink-2 placeholder-ink-4 focus:outline-none focus:ring-1 focus:ring-gold focus:border-gold"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2 px-4 rounded bg-gold hover:bg-gold-dim text-canvas font-sans font-semibold text-sm transition-all duration-200 shadow-md disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+          >
+            {loading ? "Processing..." : isSignUp ? "Create Scholar Account" : "Access Library Matrix"}
+          </button>
+        </form>
+
+        <div className="text-center pt-2">
+          <button
+            onClick={() => {
+              setIsSignUp(!isSignUp);
+              setError(null);
+              setMessage(null);
+            }}
+            className="text-xs font-sans text-gold-dim hover:text-gold transition-colors underline underline-offset-4"
+          >
+            {isSignUp ? "Already have an account? Sign In" : "Register new scholar account"}
+          </button>
+        </div>
+      </div>
+
+      <footer className="absolute bottom-6 text-center">
+        <p className="font-display italic text-ink-4 text-xs tracking-wide">
+          LitReview Matrix &mdash; an academic research instrument
+        </p>
+      </footer>
+    </div>
+  );
+}
+
