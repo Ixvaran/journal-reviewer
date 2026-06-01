@@ -2702,7 +2702,7 @@ export default function App() {
             {supabase && user && (
               <div className="hidden md:flex items-center gap-2.5 mr-2">
                 <span className="text-xs font-sans text-ink-3 italic" title={user.email}>
-                  {user.email.length > 20 ? user.email.slice(0, 18) + '...' : user.email}
+                  {user.user_metadata?.username || user.email}
                 </span>
                 <div className="h-3 w-px bg-rule-dim" />
                 <button
@@ -2896,6 +2896,7 @@ export default function App() {
 function AuthScreen({ onLogin, themeMode, toggleTheme }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -2912,6 +2913,11 @@ function AuthScreen({ onLogin, themeMode, toggleTheme }) {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
+          options: {
+            data: {
+              username: username.trim() || email.split('@')[0]
+            }
+          }
         });
         if (signUpError) throw signUpError;
         setMessage("Verification link sent! Please check your email to activate your account.");
@@ -2973,6 +2979,22 @@ function AuthScreen({ onLogin, themeMode, toggleTheme }) {
           {message && (
             <div className="p-3.5 text-xs rounded bg-gold/10 border border-gold/30 text-gold font-sans leading-relaxed">
               {message}
+            </div>
+          )}
+
+          {isSignUp && (
+            <div className="space-y-1">
+              <label className="text-[11px] font-sans font-semibold text-ink-3 uppercase tracking-wider block">
+                Scholar Username
+              </label>
+              <input
+                type="text"
+                required
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                placeholder="e.g. Dr. Farhan"
+                className="w-full bg-panel border border-rule-dim rounded px-3 py-2 text-sm font-sans text-ink-2 placeholder-ink-4 focus:outline-none focus:ring-1 focus:ring-gold focus:border-gold"
+              />
             </div>
           )}
 
