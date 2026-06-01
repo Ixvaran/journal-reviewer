@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef, Component } from 'react';
 import { supabase } from './supabaseClient';
 
 // ─── PDF.js — lazy-loaded on first use ───────────────────────────────────────
@@ -2447,7 +2447,7 @@ function ThematicGrid({ papers, themes, onUpdateThemeCitations }) {
 }
 
 // ─── App Root ─────────────────────────────────────────────────────────────────
-export default function App() {
+function AppContent() {
   const [papers, setPapers] = useState(() => {
     const saved = localStorage.getItem('lit_papers');
     return saved ? JSON.parse(saved) : SEED_PAPERS;
@@ -2843,17 +2843,25 @@ export default function App() {
 
   const totalGraphCitations = useMemo(() => {
     let count = 0;
-    themes.forEach(t => {
-      count += (t.linked_citations || []).length;
-    });
+    if (Array.isArray(themes)) {
+      themes.forEach(t => {
+        if (t && Array.isArray(t.linked_citations)) {
+          count += t.linked_citations.length;
+        }
+      });
+    }
     return count;
   }, [themes]);
 
   const totalQuotesCount = useMemo(() => {
     let count = 0;
-    papers.forEach(p => {
-      count += (p.key_quotes || []).length;
-    });
+    if (Array.isArray(papers)) {
+      papers.forEach(p => {
+        if (p && Array.isArray(p.key_quotes)) {
+          count += p.key_quotes.length;
+        }
+      });
+    }
     return count;
   }, [papers]);
 
@@ -3007,7 +3015,7 @@ export default function App() {
               </div>
               <div>
                 <p className="text-[9.5px] font-sans uppercase tracking-[0.14em] text-ink-3">Corpus Papers</p>
-                <p className="font-display text-xl font-bold text-ink mt-0.5">{papers.length}</p>
+                <p className="font-display text-xl font-bold text-ink mt-0.5">{(papers || []).length}</p>
               </div>
             </div>
 
@@ -3021,7 +3029,7 @@ export default function App() {
               </div>
               <div>
                 <p className="text-[9.5px] font-sans uppercase tracking-[0.14em] text-ink-3">Synthesis Themes</p>
-                <p className="font-display text-xl font-bold text-ink mt-0.5">{themes.length}</p>
+                <p className="font-display text-xl font-bold text-ink mt-0.5">{(themes || []).length}</p>
               </div>
             </div>
 
@@ -3061,7 +3069,7 @@ export default function App() {
                 Literature Review Matrix
               </h1>
               <p className="text-[11px] font-sans text-ink-3 mt-0.5 tracking-wide">
-                {filteredPapers.length} of {papers.length} entr{papers.length !== 1 ? 'ies' : 'y'}
+                {(filteredPapers || []).length} of {(papers || []).length} entr{(papers || []).length !== 1 ? 'ies' : 'y'}
                 {searchQuery ? ` — filtered by "${searchQuery}"` : ''}
               </p>
             </div>
@@ -3722,6 +3730,60 @@ function CorpusGraph({ papers, themes }) {
         )}
       </div>
     </div>
+  );
+}
+
+// ─── Error Boundary ───────────────────────────────────────────────────────────
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-dvh flex flex-col bg-canvas justify-center items-center p-6 text-center">
+          <div className="page-crown" aria-hidden="true" />
+          <div className="max-w-md space-y-4 bg-surface border border-rouge-rule rounded p-6 shadow-lg">
+            <h2 className="font-display text-2xl font-semibold text-rouge">Workspace Error</h2>
+            <p className="text-sm font-sans text-ink-2 leading-relaxed">
+              A runtime error occurred in your scholar workspace:
+            </p>
+            <pre className="p-3 bg-rouge-wash border border-rouge-rule rounded text-xs text-rouge font-mono text-left overflow-auto max-h-48 select-all whitespace-pre-wrap">
+              {this.state.error?.toString()}
+            </pre>
+            <button
+              onClick={() => {
+                localStorage.clear();
+                window.location.reload();
+              }}
+              className="px-4 py-2 bg-rouge border border-rouge-rule rounded text-canvas text-sm font-semibold hover:bg-rouge/80 transition-colors"
+            >
+              Clear Workspace Cache &amp; Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
   );
 }
 
